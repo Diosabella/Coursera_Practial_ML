@@ -1,0 +1,188 @@
+---
+title: "ML2019"
+output: html_document
+---
+Loading packages
+```{r }
+library(knitr)
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(rattle)
+library(randomForest)
+library(corrplot)
+library(tidyverse)
+library(corrgram)
+library(Amelia)
+```
+
+
+Loading data
+```{r}
+Training <- read.csv(url("http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"), header=TRUE)
+Testing  <- read.csv(url("http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"), header=TRUE)
+```
+
+Spliting data into training and testing sets
+```{r}
+set.seed(2019)
+Index  <- createDataPartition(Training$classe, p=0.7, list=FALSE)
+training <- Training[Index, ]
+validation  <- Training[-Index, ]
+dim(training)
+dim(validation)
+```
+
+
+Cleaning Data
+Variables with very large proportion of NAs will be removed.
+```{r}
+#First, I identify near zero variance variables in the dataset
+#and remove them
+
+nearZeroVar(training)
+near_zero_variance <- nearZeroVar(training)
+training <- training[, -near_zero_variance]
+validation  <- validation[, -near_zero_variance]
+dim(training)
+dim(validation)
+```
+
+```{r}
+#Second, I remove all NA values and first 5 columns of the dataset
+#representing ID values
+
+remove  <- sapply(training, function(x) mean(is.na(x))) > 0.95
+training <- training[, remove==FALSE]
+validation  <- validation[, remove==FALSE]
+
+training <- training[, -(1:5)]
+validation  <- validation[, -(1:5)]
+dim(training)
+dim(validation)
+
+#Thus I reduce the dataset for the analysis to the 54 variables only
+
+```
+
+After preparation of data, next step is to view correlation among different variables. To view correlation corr plot will be used. Corr plot works on numeric data so data will be first checked whether all variabels are numberic.
+```{r}
+sum(sapply(training[-54], is.numeric) == FALSE)
+
+#there is no non numeric column
+corMatrix <- cor(training[, -54])
+corrplot(corMatrix, order = "FPC", method = "color", type = "lower", 
+         tl.cex = 0.8, tl.col = rgb(0, 0, 0), tl.srt = 1)
+
+```
+
+```{r}
+corrgram(training,order=TRUE, lower.panel=panel.shade,
+         upper.panel=panel.pie, text.panel=panel.txt)
+```
+
+
+To get an idea about the structure of response varible a histogram will be generated.
+```{r}
+ggplot(training,aes(x=classe)) + geom_histogram(stat = "count",alpha=0.5,fill='blue') + theme_minimal()
+```
+
+
+Modeling
+There are many algorithms for predictive analysis that depends upon type of response and explanatory variables. Our response variable is a categorical variabel with more than 2 factors and explainatory variables are numeric. For this type of data three important modelling technoques are:
+Decision trees with CART (rpart)
+Stochastic gradient boosting trees (gbm)
+Random forest decision trees (rf)
+All models will be assessed for thier accuracy and best model will be choosed.
+
+
+Decision trees with CART (rpart)
+This model has been choosen for its recursive partitioning architecture which performs better when response variable is categorical.
+
+```{r}
+set.seed(2019)
+mod_DT <- rpart(classe ~ ., data=training, method="class")
+fancyRpartPlot(mod_DT)
+```
+
+```{r}
+#predicting 
+predict_DT <- predict(mod_DT, newdata=validation, type="class")
+conf_Mat_DT <- confusionMatrix(predict_DT, validation$classe)
+conf_Mat_DT
+```
+
+
+Accuracy of the rpart model will be plotted
+```{r}
+#ploting accuracy
+plot(conf_Mat_DT$table, col = conf_Mat_DT$byClass, 
+     main = paste("Decision Tree (rpart) - Accuracy =",
+                  round(conf_Mat_DT$overall['Accuracy'], 4)))
+```
+
+
+Next to check is Stochastic gradient boosting trees (gbm)
+This model is a combination of decision tree and boosting model and frequently used for prediction of categorical variable. It has following advantages:
+
+Can be used with a variety of response types (binomial, gaussian, poisson)
+Stochastic, which improves predictive performance
+The best fit is automatically detected by the algorithm
+Model represents the effect of each predictor after accounting for the effects of other predictors
+Robust to missing values and outliers
+However it requires at least two predictor (explainatory) variables to run
+
+Cross validation method will be used for training and prediction
+```{r}
+set.seed(2019)
+ctl_GBM <- trainControl(method = "cv", number = 5)
+mod_GBM  <- train(classe ~ ., data=training, method = "gbm",
+                    trControl = ctl_GBM, verbose = FALSE)
+mod_GBM$finalModel
+```
+
+```{r}
+predict_GBM <- predict(mod_GBM, newdata=validation)
+conf_Mat_GBM <- confusionMatrix(predict_GBM, validation$classe)
+conf_Mat_GBM
+```
+
+```{r}
+plot(conf_Mat_GBM$table, col = conf_Mat_GBM$byClass, 
+     main = paste("GBM - Accuracy =", round(conf_Mat_GBM$overall['Accuracy'], 3)))
+
+```
+
+
+Random Forest
+Random forest is decision tree based model that minimizes decision tree associated overfitting by aggregating results without increasing bias error.
+This is considered to be very powerful method for categorical data prediction.
+```{r}
+#3. Random forest decision trees (rf)
+set.seed(2019)
+ctr_rf <- trainControl(method="cv", number=3, verboseIter=FALSE)
+mod_RF <- train(classe ~ ., data=training, method="rf",
+                          trControl=ctr_rf)
+mod_RF$finalModel
+
+```
+
+```{r}
+predict_RF <- predict(mod_RF, newdata=validation)
+conf_Mat_RF <- confusionMatrix(predict_RF, validation$classe)
+conf_Mat_RF
+```
+
+```{r}
+plot(conf_Mat_RF$table, col = conf_Mat_RF$byClass, 
+     main = paste("Random Forest - Accuracy =",
+     round(conf_Mat_RF$overall['Accuracy'], 4)))
+```
+
+```{r}
+# Random forest decision tree exhibits most accuracy so this model will be used on Testing data
+
+predict_RF_Testing <- predict(mod_RF, newdata=Testing)
+predict_RF_Testing
+```
+
